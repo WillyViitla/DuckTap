@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦆 Live Duck Counter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One:wght@400&family=Nunito:wght@400;600;700&display=swap');
+        
+        body {
+            font-family: 'Nunito', sans-serif;
+        }
+        
+        .fredoka {
+            font-family: 'Fredoka One', cursive;
+        }
+        
+        .duck {
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.1));
+        }
+        
+        .duck:hover {
+            transform: scale(1.1);
+            filter: drop-shadow(0 15px 30px rgba(0,0,0,0.2));
+        }
+        
+        .duck-bounce {
+            animation: bounce 0.6s ease-out;
+        }
+        
+        .duck-waddle {
+            animation: waddle 3s ease-in-out infinite;
+        }
+        
+        .duck-idle {
+            animation: idle 4s ease-in-out infinite;
+        }
+        
+        @keyframes bounce {
+            0% { transform: scale(1) rotate(0deg); }
+            25% { transform: scale(1.3) rotate(-15deg); }
+            50% { transform: scale(1.4) rotate(10deg); }
+            75% { transform: scale(1.2) rotate(-5deg); }
+            100% { transform: scale(1) rotate(0deg); }
+        }
+        
+        @keyframes waddle {
+            0%, 100% { transform: rotate(0deg) translateX(0px); }
+            25% { transform: rotate(-5deg) translateX(-3px); }
+            75% { transform: rotate(5deg) translateX(3px); }
+        }
+        
+        @keyframes idle {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            25% { transform: translateY(-5px) rotate(-2deg); }
+            75% { transform: translateY(-3px) rotate(2deg); }
+        }
+        
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-100vh) rotate(0deg);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(100vh) rotate(720deg);
+                opacity: 0;
+            }
+        }
+        
+        .speech-bubble {
+            position: absolute;
+            background: white;
+            border-radius: 20px;
+            padding: 8px 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 100;
+        }
+        
+        .speech-bubble:after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 8px solid white;
+        }
+        
+        .speech-bubble.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-10px);
+        }
+        
+        .pulse-ring {
+            animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.8);
+                opacity: 1;
+            }
+            80% {
+                transform: scale(1.2);
+                opacity: 0;
+            }
+            100% {
+                transform: scale(1.2);
+                opacity: 0;
+            }
+        }
+        
+        .hat {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 2rem;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .hat.show {
+            opacity: 1;
+        }
+        
+        .duck-trail {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0.3;
+            animation: trail-fade 2s ease-out forwards;
+        }
+        
+        @keyframes trail-fade {
+            0% {
+                transform: scale(1);
+                opacity: 0.3;
+            }
+            100% {
+                transform: scale(0);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-sky-200 via-blue-200 to-cyan-200 min-h-screen overflow-hidden relative">
+    <!-- Animated Background Elements -->
+    <div class="absolute inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute top-20 left-10 w-4 h-4 bg-white rounded-full opacity-20 animate-pulse"></div>
+        <div class="absolute top-40 right-20 w-6 h-6 bg-white rounded-full opacity-15 animate-bounce"></div>
+        <div class="absolute bottom-32 left-1/4 w-3 h-3 bg-white rounded-full opacity-25 animate-ping"></div>
+        <div class="absolute bottom-20 right-1/3 w-5 h-5 bg-white rounded-full opacity-20 animate-pulse"></div>
+    </div>
+
+    <!-- Header -->
+    <div class="text-center pt-6 pb-4 relative z-10">
+        <h1 class="fredoka text-6xl md:text-8xl text-slate-800 mb-2 drop-shadow-lg">
+            🦆 Live Duck Counter
+        </h1>
+        <p class="text-xl text-slate-700 font-semibold">
+            Click the duck to increment the global counter! 
+        </p>
+        <div class="mt-2 text-lg text-slate-600">
+            <span id="userCount">0</span> duck hunters online
+        </div>
+    </div>
+
+    <!-- Counter Display -->
+    <div class="flex justify-center mb-8 relative z-10">
+        <div class="bg-white/90 backdrop-blur-sm rounded-3xl px-8 py-6 shadow-2xl border border-white/50">
+            <div class="text-center">
+                <div class="text-6xl md:text-8xl font-bold text-red-500 mb-2 drop-shadow-lg" id="counter">
+                    0
+                </div>
+                <p class="text-slate-700 font-semibold text-lg">
+                    Total Duck Clicks Worldwide
+                </p>
+                <div class="mt-2 text-sm text-slate-600">
+                    Next milestone: <span id="nextMilestone" class="font-semibold text-blue-600">100</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Duck Container -->
+    <div class="relative w-full h-96 md:h-[500px]" id="duckZone">
+        <!-- Duck -->
+        <div class="absolute transition-all duration-1000 ease-out cursor-pointer select-none" 
+             id="duckContainer" 
+             style="left: 50%; top: 50%; transform: translate(-50%, -50%);">
+            
+            <!-- Hat -->
+            <div class="hat" id="duckHat"></div>
+            
+            <!-- Speech Bubble -->
+            <div class="speech-bubble" id="speechBubble"></div>
+            
+            <!-- Click Effect Ring -->
+            <div class="absolute inset-0 rounded-full border-4 border-yellow-400 opacity-0" id="clickRing"></div>
+            
+            <!-- The Duck -->
+            <div class="duck duck-idle text-8xl md:text-9xl" id="duck">
+                🦆
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="fixed bottom-4 left-4 bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-xl border border-white/50 max-w-xs">
+        <h3 class="font-bold text-slate-800 mb-2">Your Stats</h3>
+        <div class="space-y-1 text-sm text-slate-600">
+            <div>Your clicks: <span id="userClicks" class="font-semibold text-blue-600">0</span></div>
+            <div>Connection: <span id="connectionStatus" class="font-semibold text-green-600">Connected</span></div>
+            <div class="w-full bg-slate-200 rounded-full h-2 mt-2">
+                <div class="bg-gradient-to-r from-red-400 to-yellow-400 h-2 rounded-full transition-all duration-300" 
+                     id="cooldownBar" style="width: 0%"></div>
+            </div>
+            <div class="text-xs text-slate-500" id="cooldownText"></div>
+        </div>
+    </div>
+
+    <!-- Live Activity Feed -->
+    <div class="fixed bottom-4 right-4 bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-xl border border-white/50 max-w-xs max-h-48 overflow-y-auto">
+        <h3 class="font-bold text-slate-800 mb-2">Live Activity</h3>
+        <div id="activityFeed" class="space-y-1 text-xs text-slate-600">
+            <div class="text-slate-500 italic">Waiting for clicks...</div>
+        </div>
+    </div>
+
+    <!-- Milestone Popup -->
+    <div class="fixed inset-0 flex items-center justify-center pointer-events-none z-50" id="milestonePopup">
+        <div class="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-8 rounded-3xl shadow-2xl transform scale-0 transition-all duration-500" id="milestoneContent">
+            <div class="text-center">
+                <div class="text-4xl mb-4">🎉</div>
+                <div class="text-3xl font-bold mb-2" id="milestoneTitle"></div>
+                <div class="text-lg" id="milestoneText"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class LiveDuckCounter {
+            constructor() {
+                this.socket = io();
+                this.userClicks = 0;
+                this.isOnCooldown = false;
+                this.duckPosition = { x: 50, y: 50 };
+                this.duckDirection = 1;
+                this.activityLog = [];
+                
+                this.initElements();
+                this.setupSocketListeners();
+                this.setupEventListeners();
+                
+                // Start duck idle animation
+                this.startIdleAnimation();
+            }
+            
+            initElements() {
+                this.duck = document.getElementById('duck');
+                this.duckContainer = document.getElementById('duckContainer');
+                this.duckZone = document.getElementById('duckZone');
+                this.counter = document.getElementById('counter');
+                this.userClicksSpan = document.getElementById('userClicks');
+                this.userCountSpan = document.getElementById('userCount');
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.cooldownBar = document.getElementById('cooldownBar');
+                this.cooldownText = document.getElementById('cooldownText');
+                this.speechBubble = document.getElementById('speechBubble');
+                this.clickRing = document.getElementById('clickRing');
+                this.duckHat = document.getElementById('duckHat');
+                this.nextMilestone = document.getElementById('nextMilestone');
+                this.activityFeed = document.getElementById('activityFeed');
+                this.milestonePopup = document.getElementById('milestonePopup');
+                this.milestoneContent = document.getElementById('milestoneContent');
+                this.milestoneTitle = document.getElementById('milestoneTitle');
+                this.milestoneText = document.getElementById('milestoneText');
+            }
+            
+            setupSocketListeners() {
+                this.socket.on('connect', () => {
+                    this.connectionStatus.textContent = 'Connected';
+                    this.connectionStatus.className = 'font-semibold text-green-600';
+                });
+                
+                this.socket.on('disconnect', () => {
+                    this.connectionStatus.textContent = 'Disconnected';
+                    this.connectionStatus.className = 'font-semibold text-red-600';
+                });
+                
+                this.socket.on('initialData', (data) => {
+                    this.updateCounter(data.totalClicks);
+                    this.userCountSpan.textContent = data.connectedUsers;
+                    this.updateDuckPosition(data.duckPosition, data.duckDirection);
+                    this.updateHat(data.totalClicks);
+                });
+                
+                this.socket.on('userCountUpdate', (count) => {
+                    this.userCountSpan.textContent = count;
+                });
+                
+                this.socket.on('duckClicked', (data) => {
+                    this.updateCounter(data.totalClicks);
+                    
+                    if (data.clickerId === this.socket.id) {
+                        this.userClicks++;
+                        this.userClicksSpan.textContent = this.userClicks;
+                    }
+                    
+                    this.animateDuckClick(data.duckReaction);
+                    this.updateHat(data.totalClicks);
+                    this.addActivity(`Duck clicked! Total: ${data.totalClicks.toLocaleString()}`);
+                    
+                    if (data.milestone) {
+                        this.addActivity(`🎉 Milestone: ${data.milestone.toLocaleString()} clicks!`);
+                    }
+                });
+                
+                this.socket.on('duckMove', (data) => {
+                    this.updateDuckPosition(data.position, data.direction);
+                    if (data.isWaddling) {
+                        this.startWaddleAnimation();
+                    } else {
+                        this.stopWaddleAnimation();
+                    }
+                });
+                
+                this.socket.on('milestoneReached', (data) => {
+                    this.showMilestonePopup(data.milestone);
+                    this.createConfetti();
+                });
+                
+                this.socket.on('cooldownActive', (data) => {
+                    this.showCooldownMessage(data.remaining);
+                });
+            }
+            
+            setupEventListeners() {
+                this.duckContainer.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.clickDuck();
+                });
+                
+                // Add hover effects
+                this.duckContainer.addEventListener('mouseenter', () => {
+                    if (!this.isOnCooldown) {
+                        this.duck.style.transform = 'scale(1.1)';
+                    }
+                });
+                
+                this.duckContainer.addEventListener('mouseleave', () => {
+                    if (!this.isOnCooldown) {
+                        this.duck.style.transform = 'scale(1)';
+                    }
+                });
+            }
+            
+            clickDuck() {
+                if (this.isOnCooldown) return;
+                
+                this.socket.emit('duckClick', { timestamp: Date.now() });
+                this.startCooldown();
+                this.createClickTrail();
+            }
+            
+            startCooldown() {
+                this.isOnCooldown = true;
+                this.duckContainer.style.cursor = 'not-allowed';
+                this.duck.style.opacity = '0.7';
+                
+                let progress = 0;
+                const duration = 1000;
+                const interval = setInterval(() => {
+                    progress += 50;
+                    const percentage = (progress / duration) * 100;
+                    this.cooldownBar.style.width = `${percentage}%`;
+                    
+                    const remaining = Math.ceil((duration - progress) / 1000);
+                    if (remaining > 0) {
+                        this.cooldownText.textContent = `Cooldown: ${remaining}s`;
+                    }
+                    
+                    if (progress >= duration) {
+                        clearInterval(interval);
+                        this.isOnCooldown = false;
+                        this.duckContainer.style.cursor = 'pointer';
+                        this.duck.style.opacity = '1';
+                        this.cooldownBar.style.width = '0%';
+                        this.cooldownText.textContent = '';
+                    }
+                }, 50);
+            }
+            
+            updateCounter(count) {
+                this.counter.textContent = count.toLocaleString();
+                
+                // Update next milestone
+                const milestones = [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
+                const nextMilestone = milestones.find(m => count < m);
+                if (nextMilestone) {
+                    this.nextMilestone.textContent = nextMilestone.toLocaleString();
+                } else {
+                    this.nextMilestone.textContent = 'MAX ACHIEVED! 🏆';
+                }
+            }
+            
+            updateDuckPosition(position, direction) {
+                this.duckPosition = position;
+                this.duckDirection = direction;
+                
+                const rect = this.duckZone.getBoundingClientRect();
+                const x = (position.x / 100) * rect.width;
+                const y = (position.y / 100) * rect.height;
+                
+                this.duckContainer.style.left = `${x}px`;
+                this.duckContainer.style.top = `${y}px`;
+                this.duckContainer.style.transform = `translate(-50%, -50%) scaleX(${direction})`;
+            }
+            
+            animateDuckClick(reaction) {
+                // Bounce animation
+                this.duck.classList.remove('duck-bounce');
+                setTimeout(() => this.duck.classList.add('duck-bounce'), 10);
+                setTimeout(() => this.duck.classList.remove('duck-bounce'), 600);
+                
+                // Speech bubble
+                this.showSpeech(reaction.speech);
+                
+                // Click ring effect
+                this.clickRing.classList.add('pulse-ring');
+                this.clickRing.style.opacity = '1';
+                setTimeout(() => {
+                    this.clickRing.classList.remove('pulse-ring');
+                    this.clickRing.style.opacity = '0';
+                }, 1500);
+            }
+            
+            showSpeech(text) {
+                this.speechBubble.textContent = text;
+                this.speechBubble.classList.add('show');
+                
+                setTimeout(() => {
+                    this.speechBubble.classList.remove('show');
+                }, 2500);
+            }
+            
+            startWaddleAnimation() {
+                this.duck.classList.remove('duck-idle');
+                this.duck.classList.add('duck-waddle');
+            }
+            
+            stopWaddleAnimation() {
+                this.duck.classList.remove('duck-waddle');
+                this.duck.classList.add('duck-idle');
+            }
+            
+            startIdleAnimation() {
+                this.duck.classList.add('duck-idle');
+            }
+            
+            updateHat(totalClicks) {
+                const hats = ['🎩', '👑', '🧢', '🎓', '🕶️', '🎪'];
+                const hatMilestones = [1000, 2500, 5000, 7500, 10000, 15000];
+                
+                let hatIndex = -1;
+                for (let i = 0; i < hatMilestones.length; i++) {
+                    if (totalClicks >= hatMilestones[i]) {
+                        hatIndex = i;
+                    }
+                }
+                
+                if (hatIndex >= 0) {
+                    this.duckHat.textContent = hats[hatIndex];
+                    this.duckHat.classList.add('show');
+                } else {
+                    this.duckHat.classList.remove('show');
+                }
+            }
+            
+            showMilestonePopup(milestone) {
+                this.milestoneTitle.textContent = `${milestone.toLocaleString()} CLICKS!`;
+                this.milestoneText.textContent = 'Milestone Achieved! 🎉';
+                
+                this.milestonePopup.style.pointerEvents = 'all';
+                this.milestoneContent.style.transform = 'scale(1)';
+                
+                setTimeout(() => {
+                    this.milestoneContent.style.transform = 'scale(0)';
+                    setTimeout(() => {
+                        this.milestonePopup.style.pointerEvents = 'none';
+                    }, 500);
+                }, 4000);
+            }
+            
+            createConfetti() {
+                const colors = ['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd'];
+                
+                for (let i = 0; i < 100; i++) {
+                    setTimeout(() => {
+                        const confetti = document.createElement('div');
+                        confetti.className = 'confetti';
+                        confetti.style.left = Math.random() * 100 + 'vw';
+                        confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                        confetti.style.borderRadius = Math.random() > 0.5 ? '50%' : '0%';
+                        confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+                        confetti.style.animation = `confetti-fall ${confetti.style.animationDuration} ease-out forwards`;
+                        
+                        document.body.appendChild(confetti);
+                        
+                        setTimeout(() => confetti.remove(), 5000);
+                    }, i * 30);
+                }
+            }
+            
+            createClickTrail() {
+                const trail = document.createElement('div');
+                trail.className = 'duck-trail bg-yellow-300';
+                trail.style.left = this.duckContainer.style.left;
+                trail.style.top = this.duckContainer.style.top;
+                trail.style.transform = 'translate(-50%, -50%)';
+                
+                this.duckZone.appendChild(trail);
+                setTimeout(() => trail.remove(), 2000);
+            }
+            
+            addActivity(message) {
+                this.activityLog.unshift({
+                    message,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+                
+                if (this.activityLog.length > 10) {
+                    this.activityLog.pop();
+                }
+                
+                this.updateActivityFeed();
+            }
+            
+            updateActivityFeed() {
+                this.activityFeed.innerHTML = this.activityLog
+                    .map(item => `<div class="flex justify-between"><span>${item.message}</span><span class="text-slate-400 ml-2">${item.timestamp}</span></div>`)
+                    .join('');
+            }
+            
+            showCooldownMessage(remaining) {
+                const seconds = Math.ceil(remaining / 1000);
+                this.showSpeech(`Wait ${seconds} more second${seconds !== 1 ? 's' : ''}!`);
+            }
+        }
+        
+        // Initialize the live duck counter when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new LiveDuckCounter();
+        });
+    </script>
+</body>
+</html>
